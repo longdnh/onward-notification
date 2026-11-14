@@ -1,4 +1,4 @@
-package rabbit
+package event
 
 import (
 	"encoding/json"
@@ -31,7 +31,12 @@ func (m TokenMail) Validate() error {
 	return nil
 }
 
-func decode(body []byte) (TokenMail, error) {
+const (
+        TypeEmailVerification = "onward.auth.email-verification-requested.v1"
+        TypePasswordReset     = "onward.auth.password-reset-requested.v1"
+)
+
+func Decode(body []byte) (TokenMail, error) {
 	var m TokenMail
 
 	if err := json.Unmarshal(body, &m); err != nil {

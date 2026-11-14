@@ -6,6 +6,7 @@ import (
 	"log"
 
 	"github.com/longdnh/onward-notification/internal/config"
+	"github.com/longdnh/onward-notification/internal/event"
 	"github.com/rabbitmq/amqp091-go"
 )
 
@@ -69,7 +70,7 @@ func Run(cfg config.Config) error {
 	for d := range messages {
 		log.Printf("received messageId=%s type=%s", d.MessageId, d.Type)
 
-		msg, err := decode(d.Body)
+		msg, err := event.Decode(d.Body)
 		if err != nil {
 			log.Printf("bad message %s: %v", d.MessageId, err)
 			if err := d.Ack(false); err != nil {
