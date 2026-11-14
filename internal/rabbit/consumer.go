@@ -67,11 +67,20 @@ func Run(cfg config.Config) error {
 	}
 
 	for d := range messages {
-		log.Printf("Received a message: %s", d.Body)
 		log.Printf("received messageId=%s type=%s", d.MessageId, d.Type)
-		err := d.Ack(false)
+
+		msg, err := decode(d.Body)
 		if err != nil {
-			log.Printf("ack failed: %v", err)
+			log.Printf("bad message %s: %v", d.MessageId, err)
+			if err := d.Ack(false); err != nil {
+				return fmt.Errorf("ack %s: %w", d.MessageId, err)
+			}
+			continue
+		}
+		log.Printf("email=%s expiresAt=%s", msg.Email, msg.ExpiresAt)
+
+		if err := d.Ack(false); err != nil {
+			return fmt.Errorf("ack %s: %w", d.MessageId, err)
 		}
 	}
 
