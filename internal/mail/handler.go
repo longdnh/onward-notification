@@ -15,10 +15,10 @@ type Handler struct {
 }
 
 func NewHandler(c Composer, s *Sender) *Handler {
-	return &Handler{c, s}
+	return &Handler{composer: c, sender: s}
 }
 
-func (h Handler) Handle(ctx context.Context, m event.TokenMail) error {
+func (h *Handler) Handle(ctx context.Context, m event.TokenMail) error {
 	now := time.Now()
 
 	if !m.ExpiresAt.After(now) {

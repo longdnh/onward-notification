@@ -16,6 +16,11 @@ type TokenMail struct {
 	ExpiresAt  time.Time `json:"expiresAt"`
 }
 
+const (
+	TypeEmailVerification = "onward.auth.email-verification-requested.v1"
+	TypePasswordReset     = "onward.auth.password-reset-requested.v1"
+)
+
 func (m TokenMail) Validate() error {
 	if m.Email == "" {
 		return errors.New("Email is empty")
@@ -28,13 +33,12 @@ func (m TokenMail) Validate() error {
 	if m.ExpiresAt.IsZero() {
 		return errors.New("ExpiresAt is empty")
 	}
+
+	if m.Type != TypeEmailVerification && m.Type != TypePasswordReset {
+		return fmt.Errorf("unknown type %q", m.Type)
+	}
 	return nil
 }
-
-const (
-        TypeEmailVerification = "onward.auth.email-verification-requested.v1"
-        TypePasswordReset     = "onward.auth.password-reset-requested.v1"
-)
 
 func Decode(body []byte) (TokenMail, error) {
 	var m TokenMail

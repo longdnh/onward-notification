@@ -1,6 +1,7 @@
 package rabbit
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -10,7 +11,11 @@ import (
 	"github.com/rabbitmq/amqp091-go"
 )
 
-func Run(cfg config.Config) error {
+type Handler interface {
+	Handle(ctx context.Context, m event.TokenMail) error
+}
+
+func Run(cfg config.Config, h Handler) error {
 
 	// create a connection
 	conn, err := amqp091.Dial(cfg.RabbitURL)
@@ -79,6 +84,11 @@ func Run(cfg config.Config) error {
 			continue
 		}
 		log.Printf("email=%s expiresAt=%s", msg.Email, msg.ExpiresAt)
+
+		// Handle
+		if err := h.Handle(context.Background(), msg); err != nil {
+			return fmt.Errorf("handle %s: %w", d.MessageId, err)
+		}
 
 		if err := d.Ack(false); err != nil {
 			return fmt.Errorf("ack %s: %w", d.MessageId, err)

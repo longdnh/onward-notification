@@ -4,6 +4,7 @@ import (
 	"log"
 
 	"github.com/longdnh/onward-notification/internal/config"
+	"github.com/longdnh/onward-notification/internal/mail"
 	"github.com/longdnh/onward-notification/internal/rabbit"
 )
 
@@ -15,7 +16,12 @@ func main() {
 
 	log.Printf("rabbit=%s exchange=%s queue=%s prefetch=%d", cfg.RabbitURL, cfg.Exchange, cfg.Queue, cfg.Prefetch)
 
-	if err := rabbit.Run(cfg); err != nil {
+	composer := mail.NewComposer(cfg.FrontendBaseURL)
+	sender := mail.NewSender(cfg.SMTPHost, cfg.SMTPPort, cfg.MailFrom)
+
+	handler := mail.NewHandler(composer, sender)
+
+	if err := rabbit.Run(cfg, handler); err != nil {
 		log.Fatalf("rabbit: %v", err)
 	}
 }
