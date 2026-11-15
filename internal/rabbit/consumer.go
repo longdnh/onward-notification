@@ -17,7 +17,7 @@ type Handler interface {
 
 type Dedup interface {
 	Claim(ctx context.Context, id string) (bool, error) // write id if not exist, return false if id existed
-	Release(ctx context.Context, id string) error // release id, use when send mail fail, to flag the resend is not duplication
+	Release(ctx context.Context, id string) error       // release id, use when send mail fail, to flag the resend is not duplication
 }
 
 func Run(cfg config.Config, h Handler, dd Dedup) error {
@@ -42,6 +42,23 @@ func Run(cfg config.Config, h Handler, dd Dedup) error {
 	}
 
 	// queue declaration
+	dlx := cfg.Exchange + ".dlx"
+	dlq := cfg.Queue + ".dlq"
+
+	err = ch.ExchangeDeclare(dlx, "fanout", true, false, false, false, nil)
+	if err != nil {
+		return fmt.Errorf("fail to declare exchange: %w", err)
+	}
+
+	// dead letter handle
+	_, err = ch.QueueDeclare(dlq, true, false, false, false, amqp091.Table{
+		amqp091.QueueTypeArg: amqp091.QueueTypeQuorum,
+	})
+	if err != nil {
+		return fmt.Errorf("fail to declare dead letter queue: %w", err)
+	}
+
+	// primary queue
 	queue, err := ch.QueueDeclare(
 		cfg.Queue,
 		true,
@@ -49,7 +66,8 @@ func Run(cfg config.Config, h Handler, dd Dedup) error {
 		false,
 		false,
 		amqp091.Table{
-			amqp091.QueueTypeArg: amqp091.QueueTypeQuorum,
+			amqp091.QueueTypeArg:     amqp091.QueueTypeQuorum,
+			"x-dead-letter-exchange": dlx,
 		},
 	)
 	if err != nil {
@@ -57,6 +75,11 @@ func Run(cfg config.Config, h Handler, dd Dedup) error {
 	}
 
 	// bind
+	err = ch.QueueBind(dlq, "", dlx, false, nil)
+	if err != nil {
+		return fmt.Errorf("Fail to bind dead letter queue: %w", err)
+	}
+
 	err = ch.QueueBind(cfg.Queue, "auth.#", cfg.Exchange, false, nil)
 	if err != nil {
 		return fmt.Errorf("Fail to bind: %w", err)
@@ -83,8 +106,9 @@ func Run(cfg config.Config, h Handler, dd Dedup) error {
 		msg, err := event.Decode(d.Body)
 		if err != nil {
 			log.Printf("bad message %s: %v", d.MessageId, err)
-			if err := d.Ack(false); err != nil {
-				return fmt.Errorf("ack %s: %w", d.MessageId, err)
+			// handle Dead letter
+			if err := d.Nack(false, false); err != nil {
+				return fmt.Errorf("nack %s: %w", d.MessageId, err)
 			}
 			continue
 		}
