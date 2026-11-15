@@ -37,6 +37,10 @@ func (m TokenMail) Validate() error {
 	if m.Type != TypeEmailVerification && m.Type != TypePasswordReset {
 		return fmt.Errorf("unknown type %q", m.Type)
 	}
+
+	if m.MessageID == "" {
+		return errors.New("MessageId is empty")
+	}
 	return nil
 }
 

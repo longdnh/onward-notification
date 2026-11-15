@@ -15,8 +15,12 @@ type Handler interface {
 	Handle(ctx context.Context, m event.TokenMail) error
 }
 
-func Run(cfg config.Config, h Handler) error {
+type Dedup interface {
+	Claim(ctx context.Context, id string) (bool, error) // write id if not exist, return false if id existed
+	Release(ctx context.Context, id string) error // release id, use when send mail fail, to flag the resend is not duplication
+}
 
+func Run(cfg config.Config, h Handler, dd Dedup) error {
 	// create a connection
 	conn, err := amqp091.Dial(cfg.RabbitURL)
 	if err != nil {
@@ -72,6 +76,7 @@ func Run(cfg config.Config, h Handler) error {
 		return fmt.Errorf("Fail to consume: %w", err)
 	}
 
+	ctx := context.Background()
 	for d := range messages {
 		log.Printf("received messageId=%s type=%s", d.MessageId, d.Type)
 
@@ -85,8 +90,25 @@ func Run(cfg config.Config, h Handler) error {
 		}
 		log.Printf("email=%s expiresAt=%s", msg.Email, msg.ExpiresAt)
 
+		// Handle duplicate
+		ok, err := dd.Claim(ctx, msg.MessageID)
+		if err != nil {
+			return fmt.Errorf("claim %s: %w", msg.MessageID, err)
+		}
+
+		if !ok {
+			log.Printf("Duplicated Message, MessageId: %s", msg.MessageID)
+			if err := d.Ack(false); err != nil {
+				return fmt.Errorf("ack %s: %w", d.MessageId, err)
+			}
+			continue
+		}
+
 		// Handle
-		if err := h.Handle(context.Background(), msg); err != nil {
+		if err := h.Handle(ctx, msg); err != nil {
+			if rerr := dd.Release(ctx, msg.MessageID); rerr != nil {
+				log.Printf("release %s: %v", msg.MessageID, rerr)
+			}
 			return fmt.Errorf("handle %s: %w", d.MessageId, err)
 		}
 
