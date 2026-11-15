@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Config struct {
@@ -18,6 +19,9 @@ type Config struct {
 	MailFrom string
 
 	FrontendBaseURL string
+
+	RedisAddr string        // host:port of the Redis that remembers processed message IDs
+	DedupTTL  time.Duration // how long a processed ID is remembered; must exceed the longest token lifetime
 }
 
 func Load() (Config, error) {
@@ -28,6 +32,7 @@ func Load() (Config, error) {
 		SMTPHost:        getenv("SMTP_HOST", "localhost"),
 		MailFrom:        getenv("MAIL_FROM", "no-reply@onward.local"),
 		FrontendBaseURL: strings.TrimSuffix(getenv("FRONTEND_BASE_URL", "http://localhost:5173"), "/"),
+		RedisAddr:       getenv("REDIS_ADDR", "localhost:6379"),
 	}
 
 	var err error
@@ -37,7 +42,13 @@ func Load() (Config, error) {
 	if cfg.SMTPPort, err = getenvInt("SMTP_PORT", 1025); err != nil {
 		return Config{}, err
 	}
+	if cfg.DedupTTL, err = getenvDuration("DEDUP_TTL", 48*time.Hour); err != nil {
+		return Config{}, err
+	}
 
+	if cfg.DedupTTL < time.Minute {
+		return Config{}, fmt.Errorf("DEDUP_TTL must be at least 1m, got %s", cfg.DedupTTL)
+	}
 	if cfg.Prefetch < 1 {
 		return Config{}, fmt.Errorf("RABBITMQ_PREFETCH must be >= 1, got %d", cfg.Prefetch)
 	}
@@ -65,4 +76,17 @@ func getenvInt(key string, def int) (int, error) {
 		return 0, fmt.Errorf("%s must be an integer, got %q", key, v)
 	}
 	return n, nil
+}
+
+// getenvDuration parses values like "48h", "30m" or "1h30m".
+func getenvDuration(key string, def time.Duration) (time.Duration, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return def, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a duration like 48h, got %q", key, v)
+	}
+	return d, nil
 }
