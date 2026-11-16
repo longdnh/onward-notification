@@ -1,0 +1,6 @@
+.git
+bin
+docs
+scratch
+Dockerfile
+.dockerignore
