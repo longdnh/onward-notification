@@ -1,7 +1,11 @@
 package main
 
 import (
+	"context"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/longdnh/onward-notification/internal/config"
 	"github.com/longdnh/onward-notification/internal/dedup"
@@ -22,8 +26,11 @@ func main() {
 
 	handler := mail.NewHandler(composer, sender)
 	dedupIns := dedup.NewRedis(cfg.RedisAddr, cfg.DedupTTL)
+	
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	if err := rabbit.Run(cfg, handler, dedupIns); err != nil {
+	if err := rabbit.Run(ctx, cfg, handler, dedupIns); err != nil {
 		log.Fatalf("rabbit: %v", err)
 	}
 }

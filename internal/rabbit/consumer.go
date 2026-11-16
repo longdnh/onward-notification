@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/longdnh/onward-notification/internal/config"
 	"github.com/longdnh/onward-notification/internal/event"
@@ -20,7 +21,7 @@ type Dedup interface {
 	Release(ctx context.Context, id string) error       // release id, use when send mail fail, to flag the resend is not duplication
 }
 
-func Run(cfg config.Config, h Handler, dd Dedup) error {
+func Run(ctx context.Context, cfg config.Config, h Handler, dd Dedup) error {
 	// create a connection
 	conn, err := amqp091.Dial(cfg.RabbitURL)
 	if err != nil {
@@ -99,47 +100,67 @@ func Run(cfg config.Config, h Handler, dd Dedup) error {
 		return fmt.Errorf("Fail to consume: %w", err)
 	}
 
-	ctx := context.Background()
-	for d := range messages {
-		log.Printf("received messageId=%s type=%s", d.MessageId, d.Type)
-
-		msg, err := event.Decode(d.Body)
-		if err != nil {
-			log.Printf("bad message %s: %v", d.MessageId, err)
-			// handle Dead letter
-			if err := d.Nack(false, false); err != nil {
-				return fmt.Errorf("nack %s: %w", d.MessageId, err)
+	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("shutting down")
+			return nil
+		case d, ok := <-messages:
+			if !ok {
+				return errors.New("delivery channel closed, connection lost")
 			}
-			continue
-		}
-		log.Printf("email=%s expiresAt=%s", msg.Email, msg.ExpiresAt)
 
-		// Handle duplicate
-		ok, err := dd.Claim(ctx, msg.MessageID)
-		if err != nil {
-			return fmt.Errorf("claim %s: %w", msg.MessageID, err)
-		}
-
-		if !ok {
-			log.Printf("Duplicated Message, MessageId: %s", msg.MessageID)
-			if err := d.Ack(false); err != nil {
-				return fmt.Errorf("ack %s: %w", d.MessageId, err)
+			if err := process(ctx, d, h, dd); err != nil {
+				return err
 			}
-			continue
-		}
 
-		// Handle
-		if err := h.Handle(ctx, msg); err != nil {
-			if rerr := dd.Release(ctx, msg.MessageID); rerr != nil {
-				log.Printf("release %s: %v", msg.MessageID, rerr)
-			}
-			return fmt.Errorf("handle %s: %w", d.MessageId, err)
-		}
-
-		if err := d.Ack(false); err != nil {
-			return fmt.Errorf("ack %s: %w", d.MessageId, err)
 		}
 	}
 
-	return errors.New("delivery channel closed, connection lost")
+}
+
+func process(parent context.Context, d amqp091.Delivery, h Handler, dd Dedup) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 30*time.Second)
+	defer cancel()
+
+	log.Printf("received messageId=%s type=%s", d.MessageId, d.Type)
+
+	msg, err := event.Decode(d.Body)
+	if err != nil {
+		log.Printf("bad message %s: %v", d.MessageId, err)
+		// handle Dead letter
+		if err := d.Nack(false, false); err != nil {
+			return fmt.Errorf("nack %s: %w", d.MessageId, err)
+		}
+		return nil
+	}
+	log.Printf("email=%s expiresAt=%s", msg.Email, msg.ExpiresAt)
+
+	// Handle duplicate
+	ok, err := dd.Claim(ctx, msg.MessageID)
+	if err != nil {
+		return fmt.Errorf("claim %s: %w", msg.MessageID, err)
+	}
+
+	if !ok {
+		log.Printf("Duplicated Message, MessageId: %s", msg.MessageID)
+		if err := d.Ack(false); err != nil {
+			return fmt.Errorf("ack %s: %w", d.MessageId, err)
+		}
+		return nil
+	}
+
+	// Handle
+	if err := h.Handle(ctx, msg); err != nil {
+		if rerr := dd.Release(ctx, msg.MessageID); rerr != nil {
+			log.Printf("release %s: %v", msg.MessageID, rerr)
+		}
+		return fmt.Errorf("handle %s: %w", d.MessageId, err)
+	}
+
+	if err := d.Ack(false); err != nil {
+		return fmt.Errorf("ack %s: %w", d.MessageId, err)
+	}
+	return nil
+
 }
