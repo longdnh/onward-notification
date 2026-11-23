@@ -1,2 +1,5 @@
 bin/
 scratch/
+
+# direnv cache
+.direnv/
