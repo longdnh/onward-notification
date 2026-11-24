@@ -3,3 +3,7 @@ scratch/
 
 # direnv cache
 .direnv/
+.vscode
+
+# local environment, copy from .env.example
+.env
